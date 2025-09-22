@@ -6,7 +6,9 @@ from datetime import datetime
 from app.models.user import User
 
 class Diary(Document):
+    title: str
     user: User
-    date: datetime
+    created_at: datetime
+    updated_at: datetime
     text: str
-    sentiment: dict
+    sentiment: Optional[dict] = None
