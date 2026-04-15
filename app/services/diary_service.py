@@ -1,38 +1,32 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Union
 from beanie.operators import In
 
 from app.models.diary import Diary
 from app.models.user import User
-from transformers import pipeline, AutoTokenizer
+from transformers import pipeline, CamembertTokenizerFast
 
 # Inizializzazione del tokenizer e del modello di sentiment analysis
-tokenizer = AutoTokenizer.from_pretrained("MilaNLProc/feel-it-italian-emotion")
+tokenizer = CamembertTokenizerFast.from_pretrained("MilaNLProc/feel-it-italian-emotion")
 emotion_pipeline = pipeline(
     "text-classification",
+    tokenizer=tokenizer,
     model="MilaNLProc/feel-it-italian-emotion",
     top_k=None
 )
 
 
 async def create_diary_entry(user_id: str, title: str) -> Dict[str, str]:
-    """
-    Crea un nuovo diario per l'utente specificato.
-
-    Args:
-        user_id: L'ID dell'utente proprietario del diario
-        title: Il titolo del diario
-
-    Returns:
-        Dizionario contenente l'ID e il titolo del diario creato
-    """
     user = await User.get(user_id)
+    if not user:
+        raise ValueError("Utente non trovato")
+
     diary = Diary(
         title=title,
         text="",
         user=user,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
         sentiment=None
     )
     await diary.insert()
@@ -46,7 +40,7 @@ async def get_all_diary_entries() -> List[Diary]:
     Returns:
         Lista di tutti i documenti Diary
     """
-    return await Diary.find_all().to_list()
+    return await Diary.find_all(fetch_links=True).to_list()
 
 
 async def get_diary_by_id(entry_id: str) -> Optional[Diary]:
@@ -59,7 +53,7 @@ async def get_diary_by_id(entry_id: str) -> Optional[Diary]:
     Returns:
         Il documento Diary o None se non trovato
     """
-    return await Diary.get(entry_id)
+    return await Diary.get(entry_id, fetch_links=True)
 
 
 async def get_diaries_by_user(user_id: str) -> List[Diary]:
@@ -73,36 +67,26 @@ async def get_diaries_by_user(user_id: str) -> List[Diary]:
         Lista dei diari dell'utente
     """
     user = await User.get(user_id)
-    return await Diary.find({"user.id": user.id}).to_list()
+    # Sostituisci la query stringa con questa:
+    return await Diary.find(Diary.user.id == user.id, fetch_links=True).to_list()
 
 
 async def update_diary_entry(entry_id: str, entry_data: Dict) -> Optional[Diary]:
-    """
-    Aggiorna un diario esistente con nuove informazioni e analisi del sentiment.
-
-    Args:
-        entry_id: L'ID del diario da aggiornare
-        entry_data: Dizionario con i dati da aggiornare
-
-    Returns:
-        Il documento Diary aggiornato o None se non trovato
-    """
-    diary = await Diary.get(entry_id)
+    diary = await Diary.get(entry_id, fetch_links=True)
     if not diary:
         return None
 
-    # Estrai il testo e analizza il sentiment se presente
     text = entry_data.get("text", diary.text)
     sentiment_result = None
     if text and text != diary.text:
         sentiment_result = await sentiment_analysis(None, text)
 
-    # Aggiorna i campi del diario
     if "title" in entry_data:
         diary.title = entry_data["title"]
     if "text" in entry_data:
         diary.text = entry_data["text"]
-    diary.updated_at = datetime.utcnow()
+
+    diary.updated_at = datetime.now(timezone.utc)
     if sentiment_result:
         diary.sentiment = sentiment_result
 

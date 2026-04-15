@@ -1,35 +1,15 @@
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import EmailStr
 
-from app.models.user import User
+from app.schema.user_schema import UserResponse, UserCreate, UserUpdate, UserLogRequest
 from app.services import user_service
-
-
-# Definizione dei modelli di richiesta/risposta
-class UserCreate(BaseModel):
-    username: str
-    email: EmailStr
-    password: str
-
-
-class UserUpdate(BaseModel):
-    username: str = None
-    email: EmailStr = None
-    password: str = None
-
-
-class UserResponse(BaseModel):
-    id: str
-    username: str
-    email: EmailStr
-
 
 # Router
 user_router = APIRouter(prefix="/users", tags=["Utenti"])
 
 
-@user_router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@user_router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(user_data: UserCreate):
     """
     Crea un nuovo utente nel sistema.
@@ -142,3 +122,28 @@ async def search_users(search_term: str):
         "username": user.username,
         "email": user.email
     } for user in users]
+
+@user_router.post("/login", response_model=UserResponse)
+async def login(log_user: UserLogRequest):
+    user = await user_service.authenticate_user(log_user.email, log_user.password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenziali non valide")
+    return {
+        "id": str(user.id),
+        "username": user.username,
+        "email": user.email
+    }
+
+@user_router.get("/{user_id}/stats", response_model=List[float])
+async def get_stats_by_user(user_id: str):
+    """
+    Restituisce le statistiche di un utente:
+    [numero_di_diari, streak_giorni_consecutivi, mood]
+    """
+    stats = await user_service.get_user_stats(user_id)
+    if stats == [0, 0, 0.0]:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Utente non trovato"
+        )
+    return stats

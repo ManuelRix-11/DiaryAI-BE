@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 from pydantic import EmailStr
 
+from app.models.diary import Diary
 from app.models.user import User
 from app.core.security import hash_password
 
@@ -157,3 +158,69 @@ async def search_users(search_term: str) -> List[User]:
     }).to_list()
 
     return users
+
+async def get_user_stats(user_id: str) -> List[float]:
+    user = await User.get(user_id)
+    if not user:
+        return [0, 0, 0.0]
+
+    diaries = await Diary.find(Diary.user.id == user.id, fetch_links=True).sort("-created_at").to_list()
+
+    # 1) numero totale di diari
+    total_diaries = len(diaries)
+
+    # 2) streak attuale: giorni consecutivi fino all'ultimo diario
+    streak = 0
+    if diaries:
+        diary_dates = sorted({d.created_at.date() for d in diaries}, reverse=True)
+        expected_day = diary_dates[0]
+        streak = 1
+
+        for day in diary_dates[1:]:
+            if (expected_day - day).days == 1:
+                streak += 1
+                expected_day = day
+            else:
+                break
+
+    # 3) mood sugli ultimi 10 diari, pesato sugli score dei primi 3 sentiment
+    last_10 = diaries[:10]
+    if not last_10:
+        mood = 0.5
+    else:
+        positive_labels = {"joy", "happiness", "positive", "surprise", "calm"}
+        negative_labels = {"sadness", "anger", "fear", "disgust", "negative"}
+
+        weighted_sum = 0.0
+        score_sum = 0.0
+
+        for diary in last_10:
+            sentiment_data = diary.sentiment
+
+            if not sentiment_data or not isinstance(sentiment_data, dict):
+                continue
+
+            sentiments = sentiment_data.get("sentiments", [])
+            if not isinstance(sentiments, list):
+                continue
+
+            for item in sentiments[:3]:
+                if not isinstance(item, dict):
+                    continue
+
+                label = str(item.get("label", "")).lower()
+                score = float(item.get("score", 0.0))
+
+                if label in positive_labels:
+                    polarity = 1.0
+                elif label in negative_labels:
+                    polarity = 0.0
+                else:
+                    polarity = 0.5
+
+                weighted_sum += score * polarity
+                score_sum += score
+
+        mood = (weighted_sum / score_sum) if score_sum > 0 else 0.5
+
+    return [total_diaries, streak, mood]
